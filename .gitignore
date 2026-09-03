@@ -1,0 +1,13 @@
+# 密钥，绝不入库
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# 评测与日志产物
+eval/runs/
+*.log
