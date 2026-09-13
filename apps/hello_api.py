@@ -1,6 +1,10 @@
-"""W0 验收脚本：验证 API Key、网络连通性、流式输出、token 统计是否全部正常。
+"""Provider Smoke Test / 环境验收入口。
 
-运行：uv run hello_api.py
+职责：验证 API Key、Base URL、网络连通性、流式输出和 Token Usage 是否正常，
+帮助区分“环境/Provider 不通”和“Agent Loop 代码有问题”。这是一次性人工验收脚本，
+不是 Agent Runtime、生产服务或离线单元测试。
+
+运行：uv run -m apps.hello_api
 """
 
 import os
