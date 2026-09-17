@@ -1,11 +1,14 @@
-"""Chunking pipeline — 策略路由 + 质量门 (④ 运行时部分).
+"""Chunking pipeline — 策略路由 + 质量过滤 (④ 运行时部分).
 
-对外两套入口：
-1. 学习基线兼容：split_text_into_chunks(...) — 固定行数
-2. 可插拔入口：chunk_text(path, text, config) — 按 config.strategy 选实现
+对外三套入口：
+
+1. 学习基线兼容：split_text_into_chunks(...) — 固定行数，不做质量过滤
+2. 可插拔入口：chunk_text(path, text, config) — 按 config.strategy 选实现，返回可入库的块
+3. 可观测入口：chunk_text_result(path, text, config) — 同上，但连被丢弃的块和原因一起返回
 """
 
 from .config import ChunkConfig
+from .filters import FilterResult, filter_chunks
 from .models import Chunk
 from .strategies import get_strategy
 
@@ -16,7 +19,12 @@ def split_text_into_chunks(
     text: str,
     max_lines: int,
 ) -> list[Chunk]:
-    """Split one text value into fixed-size, line-based chunks."""
+    """按固定行数切块。
+
+    这是最早的学习基线，只跳过纯空白块，**不做质量过滤**——
+    保留它原样，是为了让「过滤到底改变了什么」有一个能对照的起点。
+    需要过滤时走 chunk_text / chunk_text_result。
+    """
     if max_lines < 1:
         raise ValueError("max_lines must be at least 1")
 
@@ -40,8 +48,16 @@ def split_text_into_chunks(
     return chunks
 
 
-def chunk_text(*, path: str, text: str, config: ChunkConfig) -> list[Chunk]:
-    """按配置选择策略切块；空块跳过由策略与 Quality Gate 共同保证。"""
+def chunk_text_result(*, path: str, text: str, config: ChunkConfig) -> FilterResult:
+    """切块 + 过滤的完整结果：保留的块、丢弃的块、丢弃原因。
+
+    想看「过滤到底丢了什么」，用这个入口；只想要能入库的块，用 chunk_text。
+    """
     strategy = get_strategy(config.strategy)
     chunks = strategy.split(path=path, text=text, max_lines=config.max_lines)
-    return [c for c in chunks if c.content.strip()]
+    return filter_chunks(chunks, config.filter)
+
+
+def chunk_text(*, path: str, text: str, config: ChunkConfig) -> list[Chunk]:
+    """按配置选策略切块并过滤，返回可以进向量库的块。"""
+    return list(chunk_text_result(path=path, text=text, config=config).kept)

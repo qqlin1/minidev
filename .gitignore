@@ -1,5 +1,7 @@
 # 密钥，绝不入库
 .env
+.env.*
+docs/*.env
 
 # Python
 __pycache__/
@@ -11,3 +13,14 @@ __pycache__/
 # 评测与日志产物
 eval/runs/
 *.log
+
+# IDE / 本地工作数据
+.idea/
+.workbuddy-ai/
+
+# 本地临时演示与学习产物（不入版本库）
+_day*.html
+_unit3_*.html
+_unit3_*.md
+_demo_*.py
+_demo_*.html

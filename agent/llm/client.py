@@ -15,6 +15,8 @@
 - 不把 reasoning_effort 等 Provider 私有参数无条件发送给所有模型。
 
 调用边界：Agent Loop 调用本类的 chat()/chat_stream()；本类再调用 OpenAI 兼容 SDK。
+**重试责任：只在本层。** SDK 内部重试已显式关闭（`max_retries=0`），
+`max_retries` 参数就是一次调用的真实总尝试次数上限，不与 SDK 相乘。
 Agent Loop 的步骤预算与工具副作用重放策略必须由上层负责。
 """
 import logging
@@ -67,6 +69,11 @@ class LLMClient:
         self._client = client or OpenAI(
             api_key=api_key or os.getenv("LLM_API_KEY"),
             base_url=base_url or os.getenv("LLM_BASE_URL", "https://api.deepseek.com"),
+            # 关掉 SDK 的内部重试（默认 2，即总共 3 次尝试）。
+            # 否则 SDK 的 3 次 × 应用层的 max_retries(3) = 最坏 9 次真实请求：
+            # 账单翻三倍、延迟也翻三倍，而且「到底试了几次」说不清。
+            # 重试预算只能由一处承担 —— 就是本类的 _call_with_retry。
+            max_retries=0,
         )
 
     # ---------- 内部：带重试的调用核心 ----------

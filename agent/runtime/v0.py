@@ -137,7 +137,7 @@ def run_turn(user_input: str, llm_client: LLMClient) -> AgentRunResult:
                 error_message=user_message,
                 error_type=exc.last_error.__class__.__name__,
             )
-        msg = resp.choices[0].message
+        msg = resp
 
         if not msg.tool_calls:  # 模型认为不需要工具了，直接给最终回答
             final_output = msg.content or ""

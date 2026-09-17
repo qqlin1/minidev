@@ -42,7 +42,7 @@ class FakeLLMClient:
         response = next(self._responses)
         if isinstance(response, Exception):
             raise response
-        return SimpleNamespace(choices=[SimpleNamespace(message=response)])
+        return response
 
 
 def test_run_turn_uses_injected_client_for_direct_answer():
