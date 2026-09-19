@@ -83,7 +83,7 @@
 
 | 阶段 | 状态 | 事实 |
 |---|---|---|
-| 第 1 周 · 知识底座与检索 | **进行中** | 切块四层（Schema/Strategy/Config/过滤）+ 质量过滤已完成；Client/Runtime 契约已修复并常驻回归，**`55 passed`**；**摄取、索引、BM25、向量、引用回答均未开始** |
+| 第 1 周 · 知识底座与检索 | **进行中** | 摄取 + 准入 + 结构切块 + 质量过滤 + 标题路径 + 幂等导入已完成，**`212 passed`**；**BM25、向量、引用回答未开始** |
 | 第 2 周 · 客服编排与交付 | **未开始** | 无路由、无实时工具、无证据门、无人工交接、无服务化、无评测报告 |
 
 Day 1—3 是唯一「进行中」的区间，Day 4 之后每一格都还是空的。
@@ -96,9 +96,12 @@ Day 1—3 是唯一「进行中」的区间，Day 4 之后每一格都还是空�
 | 单 Agent Tool Calling 循环 | `UNIT_TESTED / INTEGRATED` | Runtime 分支有离线测试；真实 `LLMClient` + 真实 `run_turn` 的跨组件契约测试已常驻（`tests/agent/test_client_runtime_contract.py`），直接回答与 Tool Round Trip 均可离线走通 |
 | LLM 客户端重试封装 | `UNIT_TESTED / INTEGRATED` | 429、超时、断连和耗尽转换已有组件测试；重试责任已收敛到应用层——`client.py` 显式关闭 SDK 内部重试（`max_retries=0`），消除 SDK×应用层叠乘（原最坏 9 次真实请求） |
 | RAG / 知识库切块底座 | `PARTIAL` | 可插拔四层已就绪；现有评测偏代码场景（fixed-lines `4/8`、code-AST `7/8`），**文档语料评测尚未建立** |
-| Chunk 质量过滤（入库前） | `TESTED`（组件） | 四条规则（无文字 / 页码页脚 / 过短 / 重复）+ 丢弃报告；过滤开与关在 8 条场景上命中数完全一致；**尚未接入真实摄取链路** |
-| 文档切分策略（标题/段落） | `LEARNING` | `markdown_heading` 任务包已下发，代码由学习者实现 |
-| 文档摄取、索引更新、删除传播 | `NOT_STARTED` | 模块 1 的核心缺口 |
+| Chunk 质量过滤（入库前） | `TESTED / INTEGRATED` | 四条规则（无文字 / 页码页脚 / 过短 / 重复）+ 丢弃报告；已接进摄取链路；已知边界：空壳块是否存活取决于字符数，正解是 `heading_path`（已实现） |
+| 文档切分策略（标题/段落） | `TESTED` | `markdown_heading` 已实现并注册；11 条场景上 `fixed_lines 5/11` vs `markdown_heading 8/11`，文档族 `2/5 -> 5/5` |
+| 标题路径（breadcrumb） | `TESTED` | `Chunk.heading_path` + 祖先栈算法；空壳块被过滤后结构信息不丢，有回归测试 |
+| 文档摄取 + 准入 | `TESTED` | 扫描 + 密钥/空文件/超大拦截 + UTF-8 读取 + 换行规范化 + 内容指纹 |
+| 幂等导入（账本比对） | `TESTED / NOT_INTEGRATED` | **文档状态机**（PROCESSING/READY/FAILED）+ 七种动作 + 僵尸接管 + 失败重试 + 删除安全阀 + JSON 账本原子写；**未接向量库** |
+| 真实 embedding、BM25、检索 | `NOT_STARTED` | 模块 2、3 的核心缺口 |
 | 检索（BM25 / Dense / Hybrid）、引用与拒答 | `NOT_STARTED` | 模块 2、3 的核心缺口 |
 | 实时工具、路由、人工交接 | `NOT_STARTED` | 模块 3 的核心缺口 |
 | FastAPI / SSE、评测报告 | `NOT_STARTED` | 模块 4 的核心缺口 |

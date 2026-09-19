@@ -104,14 +104,16 @@ M  prompt-log.md
 | Agent Loop | `TESTED`（组件）/ `INTEGRATED` | `agent/runtime/v0.py` 的 `msg = resp` 契约已与真实 `LLMClient` 对齐；`tests/agent/test_client_runtime_contract.py` 用真实 Client + 真实 Runtime 离线跑通直接回答与 Tool Round Trip |
 | Tool 错误回填 | `TESTED`（组件） | 非法 JSON、未知工具和工具异常会回填对应 `tool_call_id`；尚无统一结构化 ToolError 模型 |
 | LLM Client | `TESTED`（组件）/ `INTEGRATED` | 实现应用层 429/超时/断连重试和 stream；`chat()` 返回 message；**SDK 内部重试已显式关闭（`max_retries=0`）**，应用层是唯一重试责任人，`max_retries` 即真实总尝试次数 |
-| 离线测试入口 | `TESTED`（组件 + 跨组件） | `uv run pytest -q` 自动发现并通过 **55 项**；新增跨边界契约测试后，Client/Runtime 组合已纳入回归，同类假绿不再依赖人工探针 |
+| 离线测试入口 | `TESTED`（组件 + 跨组件 + 端到端） | `uv run pytest -q` 自动发现并通过 **212 项**；覆盖契约、摄取、切块、过滤、结构切块、幂等导入 |
 | Prompt 实验日志 | `LEARNING` | `prompt-log.md` 有模板，但第一条“结果对比/结论”仍为空 |
 | Bad Case | `TESTED` | `badcases.md` 有 2 个已修复案例；跨组件假绿案例 2026-09-17 由 `DISCOVERED / UNFIXED` 关闭为 `FIXED`，回归测试常驻 |
 | 工作区沙箱 | `NOT_STARTED` | 工具可读取任意路径及 `.env`；当前最大安全缺口 |
-| RAG / Knowledge Base 切块底座 | `PARTIAL` | `repo_qa/chunking/` 可插拔四层已就绪；现有 eval 偏代码场景：固定行 `4/8`、AST `7/8`；**文档语料切分与评测未建** |
-| Chunk 质量过滤（入库前） | `TESTED`（组件）/ `NOT_INTEGRATED` | `filters.py` 四条规则（无文字 / 页码页脚 / 过短 / 重复）+ 丢弃报告；过滤开与关在 8 条场景上命中数完全一致；**未接真实摄取链路，无真实文档语料** |
-| 文档切分策略（标题/段落） | `LEARNING` | `markdown_heading` 任务包已下发（8 道题，代码由学习者实现）；对应 v1 第 1 周 Day 2 |
-| 文档摄取（扫描 / doc_id / 统计） | `NOT_STARTED` | v1 第 1 周 Day 2—3 任务 B；尚无 `docs/` 语料与 `repo_qa/ingest/` |
+| RAG / Knowledge Base 切块底座 | `TESTED` | `repo_qa/chunking/` 可插拔四层 + `markdown_heading` 结构切块；eval 场景 11 条，`fixed_lines 5/11` vs `markdown_heading 8/11` |
+| Chunk 质量过滤（入库前） | `TESTED` / `INTEGRATED` | `filters.py` 四条规则 + 丢弃报告；已接进摄取链路；**已知边界**：空壳块是否存活取决于字符数（11 vs 阈值 10），正解是 `heading_path`（已实现） |
+| 文档切分策略（标题/段落） | `TESTED` | `markdown_heading` 已实现并注册；8 道题全部通过，报告见 `_unit3_solutions_report.html` |
+| 标题路径（breadcrumb） | `TESTED` | `Chunk.heading_path` + `build_heading_paths`（祖先栈算法）；空壳块被过滤后结构信息不丢，有回归测试 |
+| 文档摄取（扫描 / doc_id / 统计） | `TESTED` | `repo_qa/ingest/`：扫描 + 准入（密钥/空文件/超大）+ 读取（UTF-8 + 换行规范化）+ 内容指纹；`docs/` 有 6 个语料文件 |
+| 幂等导入（账本比对 + 块存储） | `TESTED` / `NOT_INTEGRATED` | `repo_qa/indexing/`：**文档状态机**（PROCESSING/READY/FAILED）+ 七种动作 + 僵尸超时接管 + 失败可见可重试 + 删除安全阀 + JSON 账本（原子写）+ 块存储（内存版）；**未接向量库，未做真实 embedding** |
 | SupportOps | `NOT_STARTED` | 业务边界和路线已定义；尚无路由、实时 Tool、多租户、人工交接或服务 API |
 | MCP / Checkpoint / Trace 平台 | `NOT_STARTED` | 尚未实现 |
 | 多 Agent | `DEFERRED` | 当前只有单 Agent；消融实验前不实施 |
@@ -120,9 +122,9 @@ M  prompt-log.md
 
 ```text
 uv run pytest -q
-结果：55 passed，exit 0（2026-09-17 收盘）
-      其中 6 项是新增的 tests/agent/test_client_runtime_contract.py 跨组件契约测试；
-      原 49 项零退化。这是组件级 + 跨边界双绿灯。
+结果：212 passed，exit 0（2026-09-19 收盘）
+      其中 47 项是 markdown_heading（结构切块 + 标题路径），
+      56 项是 indexing（幂等导入，含两个 bug 回归 + 两道一致性防线）；既有测试零退化。
 
 uv run python -m compileall -q agent apps repo_qa tests
 结果：exit 0
@@ -130,14 +132,27 @@ uv run python -m compileall -q agent apps repo_qa tests
 uv lock --check
 结果：exit 0
 
-git diff --check
-结果：exit 0；仅有 Git 的 LF/CRLF 转换提示
+幂等验证（_demo_idempotent_import.py）
+结果：首次导入 4 文档 / 7 块 -> 原样重跑全部跳过，库中数字一个没变
+      -> 一次制造四种变化后：新增 1 / 更新 1 / 改名 1 / 跳过 1 / 删除 1，
+         需重新向量化的只有 2 个（新增 + 更新；改名和跳过不计入）
+      -> 再重跑：全部跳过，库中仍是 4 文档 / 7 块
 
-跨组件契约 smoke（现已转为常驻测试，不再是人工脚本）
+删除安全阀验证
+结果：把扫描目录换成空目录（模拟路径打错）
+      -> MassRemovalRefusedError：4/4 个文档消失（100%），超过阈值 50%，拒绝执行
+      -> 库原封不动（4 文档 / 7 块）
+
+结构切块对照（_q6_compare.py，11 条场景，max_lines=6）
+结果：fixed_lines 5/11  vs  markdown_heading 8/11
+      code_symbol 0/3->0/3（降级，跑的就是同一段代码）
+      code_config 3/3->3/3（基线已打满，无提升空间）
+      doc_section 2/5->5/5（本次改动的全部收益）
+      反例：max_lines 调到 3，doc_section 从 5/5 掉到 3/5
+
+跨组件契约 smoke（常驻测试）
 结果：真实 LLMClient + 假 SDK + 真实 run_turn 直接回答走通
      AgentRunResult(stop_reason=FINAL_ANSWER, agent_steps=1, final_output='你好，我是模型')
-修复前：AttributeError: 'ChatCompletionMessage' object has no attribute 'choices'
-       位置：agent/runtime/v0.py:140
 
 OpenAI SDK 默认重试探测
 结果：OpenAI().max_retries == 2（共 3 次尝试）；应用层 max_retries=3
@@ -362,11 +377,15 @@ Client/Runtime 组合可标 `INTEGRATED`；但这仍不是真实模型调用，�
 2. 选择唯一返回契约，修改最小实现，让直接回答和 Tool Round Trip 都通过。
 3. 检查 SDK 默认重试设置，画出最坏尝试次数；避免 SDK 和应用层重试相乘。
 
-### Day 2—3：摄取与结构切块
+### Day 2—3：摄取与结构切块 ✅ 已完成（2026-09-19）
 
-1. Markdown 文档 → 稳定 `doc_id`（按内容 hash）→ 块入库；重复导入不产生重复块。
-2. `markdown_heading` 策略（任务包已下发，代码由学习者实现）。
-3. 复用已有 `filters.py`，把质量过滤接进摄取链路。
+1. ✅ Markdown 文档 → 稳定 `doc_id`（按内容 hash）→ 块入库；重复导入不产生重复块。
+2. ✅ `markdown_heading` 策略（8 道题全部通过，报告见 `_unit3_solutions_report.html`）。
+3. ✅ 复用已有 `filters.py`，把质量过滤接进摄取链路。
+4. ✅ 额外完成：准入层（密钥/空文件/超大文件拦截）、标题路径（`heading_path`）、
+   幂等导入（五种动作 + 删除安全阀 + JSON 账本原子写）。
+
+**已知未做**：真实 embedding、向量库、BM25。这些属于 Day 4—7。
 
 ### Day 4—7：检索与引用
 
@@ -413,6 +432,159 @@ Client/Runtime 组合可标 `INTEGRATED`；但这仍不是真实模型调用，�
 - [ ] 为什么当前先做单 Agent？多 Agent 的保留门槛是什么？
 
 ## 12. 更新记录
+
+### 2026-09-19：结构切块收尾 + 幂等导入（Day 2—3 完成）
+
+**背景**：学习者要求「继续学习幂等导入」。前一单元（markdown_heading 结构切块）已交付，
+本单元补齐 Day 2—3 的另一半。
+
+**新增能力**
+
+| 模块 | 内容 |
+|---|---|
+| `repo_qa/indexing/models.py` | `ImportAction`（五种动作）、`ImportedDoc`、`Manifest`、`ImportDecision`、`ImportPlan`、`ImportReport`、`MassRemovalRefusedError` |
+| `repo_qa/indexing/planner.py` | `plan_import` —— **纯函数**比对，两个键（doc_id + path）一起判断，含删除安全阀 |
+| `repo_qa/indexing/store.py` | `ChunkStore` Protocol + `InMemoryChunkStore`；`ManifestStore` Protocol + `JsonManifestStore`（临时文件 + 原子重命名）+ `InMemoryManifestStore` |
+| `repo_qa/indexing/pipeline.py` | `ImportConfig` + `import_documents` 编排（**先写块、后写账本**） |
+| `tests/repo_qa/test_indexing.py` | 38 项测试，覆盖五种动作、幂等、两个键的必要性、安全阀、写入顺序与自愈 |
+
+**关键设计决定（学习者答了四个问题，两个被纠正）**
+
+1. **账本存哪** —— 学习者答「专业版存数据库」，正确。补：**先把接口留出来**
+   （`ManifestStore` Protocol），v1 用 JSON 文件实现，换数据库不改导入逻辑。
+2. **存储层提供哪些方法** —— 学习者答「五种业务动作」，**概念错误已纠正**。
+   那五个是**决策层**词汇；存储层只提供数据操作（存/删/查）。
+   「改名」在存储层**什么都不做**（只改账本路径），所以不该出现在存储层接口里。
+3. **写入顺序** —— 学习者答「先写账本」，**反了，已纠正**。
+   先写账本 → 崩溃后「账本说有、库里没有」→ 下次判跳过 → **静默丢失且不可自愈**。
+   先写块 → 崩溃后判「新增」→ `put_document` 覆盖语义 → **自动修复**。
+   判据是「哪种错误是静默的」。生产环境的标准答案是**用事务**（两份数据同一事务边界内），
+   v1 没有数据库，退而求其次：**用「可重跑」替代「原子性」**。
+4. **REMOVED 做到哪一步** —— 学习者答「自动删」，可接受，但**缺一层保护**。
+   补：**删除比例阈值**（默认 50%）。因为「这次没扫到」≠「文档被删了」，
+   还可能是目录配错、磁盘没挂载 —— 最坏情况会清空整个知识库。
+
+**实测证据**
+
+```text
+首次导入 4 文档 / 7 块
+  -> 原样重跑：全部跳过，库中数字一个没变（幂等成立）
+  -> 一次制造四种变化：新增 1 / 更新 1 / 改名 1 / 跳过 1 / 删除 1
+     需重新向量化的只有 2 个（新增 + 更新；改名和跳过不计入）
+  -> 再重跑：全部跳过，库中仍是 4 文档 / 7 块
+  -> 扫描目录换成空目录：MassRemovalRefusedError 拦下，库原封不动
+```
+
+**验证**：`uv run pytest -q` → **201 passed**（原 145，新增 56）；`compileall` exit 0。
+
+**两个真实 bug（学习者凭直觉发现，已修复并回归）**
+
+学习者在实现完成后说「我总感觉先写块再写账本会有一些 bug」。直觉正确 ——
+问题不在顺序，而在**顺序推理的前提**。两个 bug 都已复现、修复、加回归测试。
+
+| # | Bug | 根因 | 修法 |
+|---|---|---|---|
+| 1 | 账本落盘、块存储内存时**静默丢文档** | 账本描述的是「某个块存储里有什么」。块存储换了实例，账本就成了**过期地图**：它说有 N 个文档，新库是空的 → 下次判「跳过」→ 文档永远进不了库，不报错 | 给 `ChunkStore` 加 `store_id`，账本记下它；加载时对不上就**作废账本**触发全量重建。作废必须**报出来**（意味着一次意外的全量 embedding 开销） |
+| 2 | 改名后**块里的路径还是旧的** | `Chunk.citation` 是 `path:start-end`，path 存在块自己身上。「只改账本路径、块不动」导致账本指向新名、块指向旧名 → **点击引用跳到不存在的文件** | 改名时用 `dataclasses.replace` 更新块里的 `path`（不需要重新算向量，只改元信息） |
+
+**Bug 2 的额外教训（值得记）**：第一版测试里有 `assert store.all_chunks() == chunks_before`，
+还把它当成「改名不花钱」的证据写进报告 —— **实际上那句话正是在确认 bug**。
+**测试断言了一个错误的行为，于是它永远绿**，比「没有测试」更糟，因为它给了虚假的安全感。
+
+**方法论**（比两个 bug 本身更值钱）：把直觉**变成可复现的实验**，
+找根因而不是找现象，修完补回归测试。
+
+**后续加固：两道一致性防线（2026-09-19 追加）**
+
+学习者追问「幂等入库是先记录还是先入库，想好了吗」。复核时发现：
+**「先写块后写账本」这个推理的前提（账本与块存储持久性一致）在 v1 不成立**，
+所以光排顺序不够，补了两道防线。
+
+| 防线 | 抓什么 | 机制 |
+|---|---|---|
+| 1 | **换了一个库** | `store_id` 记在账本里，加载时对不上 → 账本作废（全量重建） |
+| 2 | **还是同一个库，但内容被改动过** | 导入前和库对账：账本里有、库里没有的条目**剔出账本**（重新导入）；库里有、账本不认的**孤儿文档删掉**（防污染检索） |
+
+**防线 2 补的洞（已复现）**：同一个库（`store_id` 相同），但有人手工删掉了库里的某个文档
+→ 账本还说它有 → 下次判「跳过」→ **永远补不回来**。防线 1 抓不到这个。
+
+**导入结束后的不变量**：`库里的 doc_id 集合 == 新账本的 doc_id 集合`。
+两道防线合起来保证这一条，有对应的测试断言。
+
+**结论的修正（诚实记录设计演进）**：
+加了防线 2 之后，**「先写块还是先写账本」不再是正确性问题** —— 两种顺序都能自愈。
+之所以仍保留「先写块」，理由是**纵深防御**：
+
+1. 防线 2 依赖「账本和库能对账」。对账本身出问题（`doc_ids()` 有 bug、存储不支持列举），
+   先写账本的静默丢失又回来了。
+2. 「库里有、账本没有」是**可见的**错误；「账本有、库里没有」是**静默的**。
+   让不一致偏向「可见」的那一侧更安全。
+
+**真正的答案仍然是「用事务」**：防线 1 和 2 都是**事后修复**，事务是**事前预防**。
+
+### 2026-09-19 追加：改用文档状态机（学习者提出）
+
+**触发**：学习者给出了一套 9 步流程，核心是给文档加 `status` 字段：
+`INSERT status=PROCESSING` → 处理 → `status=READY`，
+并且「已 READY 则 skip、别人正在 PROCESSING 则不重复处理」。
+
+**评估**：这个设计**比原来的更好**，多出两个能力：
+
+| 能力 | 原设计（先写块后写账本） | 状态机设计 |
+|---|---|---|
+| 崩溃后自愈 | ✅ 靠覆盖语义 | ✅ 靠状态机 |
+| **并发安全** | ❌ **完全没有** | ✅ `PROCESSING` 就是锁 |
+| **失败可见** | ❌ 静默 | ✅ `FAILED` 状态 + 报告 |
+| **可重试** | ❌ 无 | ✅ `FAILED` → 下次 RESUMED |
+
+而且它**让「先写记录」变安全了** —— 因为写的是 `PROCESSING` 不是 `READY`，
+崩溃后状态卡住能被发现、能重做，不会静默跳过。
+
+**补上的三件事（原流程缺失）**
+
+| # | 缺失 | 后果 | 补法 |
+|---|---|---|---|
+| 1 | **僵尸 PROCESSING 的超时** | 进程崩了状态永远卡住 → **「不重复处理」变成「永远不处理」** | 记 `started_at`，超过 `processing_timeout_seconds`（默认 30 分钟）视为僵尸，判 `RESUMED` 接管 |
+| 2 | **失败处理** | 失败静默消失 | 状态置 `FAILED`，`ImportReport.failed_doc_ids` 报出来，下次 `RESUMED` 重试 |
+| 3 | **删除和改名** | 流程里没有这两种情况 | 保留 `REMOVED` / `RENAMED` 动作；且**正在处理中的文档不删**（否则会产生孤儿） |
+
+**实现**
+
+| 文件 | 改动 |
+|---|---|
+| `models.py` | 新增 `DocStatus`（PROCESSING/READY/FAILED）；`ImportedDoc` 用 `status`/`started_at`/`ready_at` 取代 `imported_at`；`ImportAction` 新增 `LOCKED`/`RESUMED`；`ImportReport` 新增 `failed_doc_ids` |
+| `planner.py` | 比对逻辑改为**先看状态、再看两个键**；新增 `_active_lock` 与 `_is_expired`；新增 `processing_timeout_seconds` 参数；`now` 变成显式参数（测试可复现） |
+| `pipeline.py` | **账本写两次**：第 4 步抢占写 PROCESSING、第 7 步收尾写 READY；失败置 FAILED；孤儿清理移到收尾前 |
+| `tests/repo_qa/test_indexing.py` | 新增 11 项状态机测试（两次写、LOCKED、僵尸接管、FAILED 重试、失败不拖垮整批等） |
+| `_demo_status_machine.py` | **新建**：六幕演示（正常流程 / skip / 并发安全 / 僵尸接管 / 失败重试 / 删除改名 + 9 步对照表） |
+
+**一个真实的越界 bug（开发中发现）**
+
+第一版实现里，防线 2（对账）把 `FAILED` 的记录也剔掉了 —— 因为「账本说有、库里没有」
+这个判据对 FAILED 也成立。后果是 `FAILED` 记录被当成「意外丢失」剔出账本，
+下次判成「ADDED」而不是「RESUMED」，**状态机里的 FAILED 就白设了**。
+
+修法：**只有 READY 的记录参与对账** ——
+`PROCESSING` 和 `FAILED` 的「库里没有块」是**预期之内**的，不是数据丢了。
+
+> 判据：**对账只抓「意外」，不碰「已知状态」。**
+
+**验证**：`uv run pytest -q` → **212 passed**（201 → 212）；`compileall` exit 0。
+
+**验证**：`uv run pytest -q` → **212 passed**（新增 11 项状态机测试）；`compileall` exit 0。
+
+**面试可讲点**：这个单元最值钱的不是代码，是四个设计判断 ——
+「两个键为什么缺一不可」「写入顺序怎么排」「没有事务时用什么替代原子性」
+「自动删除需要什么保护」，再加上「顺序推理的前提」这条。这些在面试里比
+「我写了个导入脚本」重得多。
+
+**顺带发现**：写测试时断言「新文档的标题出现在库里」失败 —— 因为那个标题只有 9 个字符，
+被 `too_short`（阈值 10）丢掉了。**这正好复现了上一单元记录的「空壳块 + 脆弱字符数边界」问题**，
+说明它不是理论担忧，而是会实际绊倒测试的真实现象。测试已改成使用更长的标题并注明原因。
+
+**面试可讲点**：这个单元最值钱的不是代码，是四个设计判断 ——
+「两个键为什么缺一不可」「写入顺序怎么排」「没有事务时用什么替代原子性」
+「自动删除需要什么保护」。这些在面试里比「我写了个导入脚本」重得多。
 
 ### 2026-09-17：S0 关闭 —— 跨组件契约假绿修复 + 重试预算收敛
 

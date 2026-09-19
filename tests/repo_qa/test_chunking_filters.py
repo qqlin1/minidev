@@ -4,8 +4,11 @@
 
 1. 每条规则都要有**它该丢的块被丢掉**（正例）和**正常块没被连累**（反例）。
    只有正例的测试，把 min_chars 调到 10000 也能全绿。
-2. 打开过滤后，现有 8 条场景评测的命中数不能下降。
+2. 打开过滤后，现有场景评测的命中数不能下降。
    过滤是「减操作」，减错东西就是直接伤害检索。
+   场景总数用 `len(ALL_SCENARIOS)` 动态取，不写死数字——
+   写死的话，每次加评测场景都要来这里改一遍，很容易漏
+   （2026-09-17 就从 8 变 11，漏改过一次）。
 """
 
 import pytest
@@ -18,7 +21,7 @@ from repo_qa.chunking import (
     chunk_text_result,
     filter_chunks,
 )
-from repo_qa.eval import compare_strategies
+from repo_qa.eval import ALL_SCENARIOS, compare_strategies
 
 
 def _chunk(content: str, *, start_line: int = 1, path: str = "doc.md") -> Chunk:
@@ -312,6 +315,6 @@ def test_filtering_never_lowers_existing_hit_rate(strategy: str, max_lines: int)
         configs=[ChunkConfig(strategy=strategy, max_lines=max_lines)]
     )
 
-    assert with_filter.total_cases == without.total_cases == 8
+    assert with_filter.total_cases == without.total_cases == len(ALL_SCENARIOS)
     assert with_filter.hits >= without.hits
     assert with_filter.hits_by_family == without.hits_by_family
